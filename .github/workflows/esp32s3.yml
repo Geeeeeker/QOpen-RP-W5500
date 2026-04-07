@@ -1,0 +1,76 @@
+# .github/workflows/build.yml
+name: Build ESP32-S3 USB/IP Firmware
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'main/**'
+      - 'components/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/*.yml'
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+env:
+  BUILD_DIR: build
+  ESP_IDF_VERSION: v5.3.1
+  TARGET_CHIP: esp32s3
+
+jobs:
+  build-usbip-firmware:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install ESP-IDF
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: ${{ env.ESP_IDF_VERSION }}
+          target: ${{ env.TARGET_CHIP }}
+
+      - name: idf_version
+        run: |
+          . $IDF_PATH/export.sh
+          idf.py --version
+
+      - name: Build USB/IP Firmware
+        run: |
+          . $IDF_PATH/export.sh
+          idf.py set-target ${{ env.TARGET_CHIP }}
+          idf.py build
+
+      - name: Archive Firmware Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32s3-usbip-firmware
+          path: |
+            build/bootloader/bootloader.bin
+            build/partition_table/partition-table.bin
+            build/usbip_server.bin
+          retention-days: 30
+
+      - name: Prepare Release Assets
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          mkdir -p release_assets
+          cp build/bootloader/bootloader.bin release_assets/
+          cp build/partition_table/partition-table.bin release_assets/
+          cp build/usbip_server.bin release_assets/
+          cd build && zip -r ../release_assets/firmware.zip . && cd ..
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release_assets/*
+          generate_release_notes: true
